@@ -686,13 +686,37 @@ function hojaAjustes() {
   const lista = tipo => S.d.categorias.filter(c => c.tipo === tipo).map(c => `<button class="row" data-a="editar-cat" data-id="${esc(c.id)}"><span class="ico" style="background:color-mix(in srgb, ${c.color} 18%, transparent)">${esc(c.emoji)}</span><span class="grow t">${esc(c.nombre)}</span><span class="dot" style="background:${c.color}"></span>${ICON.chev}</button>`).join('');
   abrirHoja(`<div class="sheet-head"><span style="min-width:70px"></span><h2>Ajustes</h2><button class="link r" data-a="cerrar">Listo</button></div>
     <div class="card" style="margin-bottom:22px"><div class="row plain">${avatar(yo, 40)}<span class="grow"><div class="t" style="font-weight:600">${esc(yo.nombre)}</div><div class="s">Sesión iniciada en este móvil</div></span></div></div>
-    <div class="section-title" style="margin-top:0">Categorías comunes</div><div class="card">${lista('comun')}<button class="row plain" style="color:var(--blue)" data-a="nueva-cat" data-t="comun">Añadir categoría</button></div>
+    <div class="section-title" style="margin-top:0">Calendario compartido</div>
+    <div id="cal-info"><div class="card"><div class="empty">Cargando…</div></div></div>
+    <div class="section-title">Categorías comunes</div><div class="card">${lista('comun')}<button class="row plain" style="color:var(--blue)" data-a="nueva-cat" data-t="comun">Añadir categoría</button></div>
     <div class="section-title">Categorías personales</div><div class="card">${lista('personal')}<button class="row plain" style="color:var(--blue)" data-a="nueva-cat" data-t="personal">Añadir categoría</button></div>
     <div class="section-title">Seguridad</div>
     <div class="fields"><div class="field"><label for="pin-a">PIN actual</label><input id="pin-a" type="password" inputmode="numeric" maxlength="6"></div>
       <div class="field"><label for="pin-n">PIN nuevo</label><input id="pin-n" type="password" inputmode="numeric" maxlength="6" placeholder="4 a 6 números"></div></div>
     <button class="btn tinted full" data-a="cambiar-pin">Cambiar PIN</button>
     <button class="btn danger full" style="margin-top:22px" data-a="salir">Cerrar sesión</button>`);
+  cargarInfoCalendario();
+}
+
+const ROLES = { owner: 'Propietario', writer: 'Puede editar', reader: 'Solo ver', freeBusyReader: 'Solo ocupado' };
+async function cargarInfoCalendario(info) {
+  if (!info) {
+    try { info = await api('calendario', {}, true); }
+    catch (e) { const el = $('#cal-info'); if (el) el.innerHTML = `<div class="card"><div class="empty">${esc(e.message)}</div></div>`; return; }
+  }
+  const el = $('#cal-info'); if (!el) return;
+  const yoDueno = info.miEmail && info.miEmail === info.dueno;
+  const lista = info.acceso === null
+    ? '<div class="empty">No se pudo leer quién tiene acceso.</div>'
+    : info.acceso.slice().sort((a, b) => (b.rol === 'owner') - (a.rol === 'owner')).map(a => `<div class="row plain"><span class="grow"><div class="t">${esc(a.email)}</div>
+        <div class="s">${ROLES[a.rol] || esc(a.rol)}${a.email === info.miEmail ? ' · tú' : ''}</div></span></div>`).join('') || '<div class="empty">Nadie más tiene acceso todavía.</div>';
+  el.innerHTML = `<div class="card">${lista}</div>
+    <div class="fields" style="margin-top:12px"><div class="field"><label for="cal-email">Tu Gmail</label>
+      <input id="cal-email" type="email" autocomplete="email" placeholder="tucorreo@gmail.com" value="${esc(info.miEmail)}"></div></div>
+    ${yoDueno ? '<p class="small muted" style="margin:-6px 4px 12px">Eres el dueño del calendario: no necesitas invitación.</p>' : `
+    <button class="btn tinted full" data-a="vincular-gmail">${info.miEmail ? 'Enviar la invitación de nuevo' : 'Guardar y enviar invitación'}</button>
+    ${info.enlace ? `<a class="btn primary full" style="margin-top:10px;text-decoration:none" href="${esc(info.enlace)}" target="_blank" rel="noopener">Añadir a mi Google Calendar</a>` : ''}
+    <p class="small muted" style="margin:10px 4px 0">Se abre Google: entra con tu Gmail y confirma «Añadir». Después, en la app de Google Calendar, comprueba que el calendario ${esc(info.nombre || '')} está activado.</p>`}`;
 }
 
 let CAT = null;
@@ -843,6 +867,16 @@ const A = {
   async 'borrar-cat'() {
     if (!confirm(`¿Borrar la categoría «${CAT.nombre}»? Los gastos que la usan quedarán «Sin categoría».`)) return;
     await api('borrarCategoria', { id: CAT.id }); await cargarMes(S.mes); hojaAjustes();
+  },
+  async 'vincular-gmail'(el) {
+    const email = $('#cal-email').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('Escribe tu Gmail completo.', true);
+    el.disabled = true;
+    try {
+      const info = await api('vincularGmail', { email });
+      toast(info.esDueno ? 'Gmail guardado' : info.invitado ? 'Invitación enviada a ' + email : 'Gmail guardado, pero no se pudo compartir el calendario', !info.esDueno && !info.invitado);
+      cargarInfoCalendario(info);
+    } finally { el.disabled = false; }
   },
   async 'cambiar-pin'() {
     const a = $('#pin-a').value, n = $('#pin-n').value;
